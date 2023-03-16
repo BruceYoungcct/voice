@@ -1,39 +1,286 @@
-<button id="start-btn">start</button>
-<button id="stop-btn">stop</button>
-<div id="result-div"></div>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta content="IE=edge" http-equiv="X-UA-Compatible">
+  <meta content="width=device-width, initial-scale=1" name="viewport">
+  <title>autheticationを使った投稿サンプル</title>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js">
+  </script>
+  <link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <div class="form-group col-sm-8" id="content">
+      <h2>サインイン</h2>
+      <div class="form-group">
+        <input class="form-control" id="username" placeholder="ユーザー名" type="text">
+      </div>
+      <div class="form-group">
+        <input class="form-control" id="password" placeholder="パスワード" type="password">
+      </div>
+      <div class="form-group">
+        <button id="signin">サインイン</button>
+      </div>
+    </div>
+  </div>
+  <script>
 
-<script>
-  const startBtn = document.querySelector('#start-btn');
-  const stopBtn = document.querySelector('#stop-btn');
-  const resultDiv = document.querySelector('#result-div');
 
-  SpeechRecognition = webkitSpeechRecognition || SpeechRecognition;
-  const recognition = new speechRecognition();
+  $(function() {
 
-  recognition.lang = 'ja-JP';
-  recognition.interimResults = true;
+  // MT投稿アプリの初期設定
+
+  const clientId = 'WebSpeechAPI_post_sample';
+  const currentSession = 'mt_session_' + clientId;
+  const currentToken = 'mt_token_' + clientId;
+  const nowTime = Math.floor(new Date().getTime() / 1000);
+
+  // MTのData APIのURI、およびサイトIDを記述
+
+  const apiUrl = '<MTCGIPath><MTDataAPIScript>';
+  const siteId = '<MTBlogID>';
+
+  // 音声認識に使う WebSpeechAPI の初期設定
+
+  let recognizing;
+  const recognition = new webkitSpeechRecognition();
   recognition.continuous = true;
+  recognition.onend = reset;
+  recognition.lang = 'ja';
 
-  let finalTranscript = ''; // 確定した(黒の)認識結果
+  // 認証チェック 
+  // 認証が済んでいる場合、関数haveSignedInを実行して投稿画面を表示
 
-  recognition.onresult = (event) => {
-    let interimTranscript = ''; // 暫定(灰色)の認識結果
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      let transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        finalTranscript += transcript;
-      } else {
-        interimTranscript = transcript;
+  if (sessionStorage.getItem(currentSession)) {
+    haveSignedIn();
+  }
+
+  // 認証用関数 signInを実行
+  // ユーザー名、パスワードが正しければ認証を実行
+
+  $('#signin').on('click', function() {
+    signIn();
+  });
+
+  // 音声認識用関数 toggleStartStop を実行
+  // 本文欄に認識した音声を文字情報として表示
+
+  $('#speech').on('click', function() {
+    toggleStartStop();
+  });
+
+  // 投稿するときに関数 postEntryを実行
+
+  $('#submit').on('click', function() {
+    const promise = Promise.resolve(checkToken());
+    promise.then(function() {
+      PostEntry();
+    });
+  });
+
+  // サインアウトをクリックしたときに関数 revokeSessionを実行
+
+  $('#signout').on('click', function() {
+    revokeSession();
+  });
+
+  // WebSpeechAPI を利用した音声認識を実行して、本文入力欄に反映する
+
+    recognition.onresult = function (event) {
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          body.value += event.results[i][0].transcript;
+        }
       }
     }
-    resultDiv.innerHTML = finalTranscript + '<i style="color:#ddd;">' + interimTranscript + '</i>';
+
+
+  // 認証済みだった場合、投稿画面を表示
+
+  function haveSignedIn() {
+    const displayData = `
+        <h3>投稿する</h3>
+        <div class="col-sm-8">
+        <div class="form-group">
+          <input id="title" name="title" placeholder="タイトル" type="text"  class="form-control">
+        </div>
+
+        <div class="form-group">
+          <button id="speech"></button>
+        </div>
+
+        <div class="form-group">
+          <textarea id="body" maxlength="140" placeholder="本文" rows="7"  class="form-control"></textarea>
+        </div>
+
+        <div class="form-group">
+          <button id="submit" name="submit" type="button">投稿する</button>
+        </div>
+        <div class="form-group">
+          <button id="signout" name="signout" type="button">サインアウト</button>
+        </div>
+        </div>
+        `
+    $("#content").empty();
+    $("#content").append(displayData);
+    reset();
   }
 
-  startBtn.onclick = () => {
-    recognition.start();
+  // MTの認証機能を通じてサインインを行う
+
+  function signIn() {
+    const username = $('#username').val();
+    const password = $('#password').val();
+    $.ajax({
+      url: apiUrl + '/v4/authentication',
+      type: 'POST',
+      dataType: 'json',
+      data: {
+        'username': username,
+        'password': password,
+        'clientId': clientId,
+      }
+    }).done(function(data) {
+      sessionStorage.setItem(currentSession, data.sessionId);
+      let TokenData = {
+        'accessToken': data.accessToken,
+        'expiresIn': data.expiresIn,
+        'gotTokenTime': nowTime,
+      }
+      sessionStorage.setItem(currentToken, JSON.stringify(TokenData));
+      alert("サインインしました。");
+      location.reload();
+    }).fail(function(data) {
+      alert("サインイン時にエラーが発生しました。再度サインインをお試しください。");
+    });
   }
-  stopBtn.onclick = () => {
-    recognition.stop();
+
+  // 音声認識機能を初期化   
+
+    function reset() {
+      recognizing = false;
+      $("#speech").html( "クリックして音声認識" );
+    }
+
+
+  // 音声認識の開始・ストップをコントロール
+
+    function toggleStartStop() {
+      if (recognizing) {
+        recognition.stop();
+        reset();
+      } else {
+        recognition.start();
+        recognizing = true;
+        $("#speech").html( "認識中 クリックでストップ" );
+      }
+    }
+
+  // MTへデータを投稿
+
+  function PostEntry() {
+    const entry = {};
+    entry.title = $('#title').val();
+    entry.body = $('#body').val();
+    $.ajax({
+      url: apiUrl + '/v4/sites/' + siteId + '/entries',
+      type: 'POST',
+      dataType: 'json',
+      headers: {
+        'X-MT-Authorization': 'MTAuth accessToken=' + JSON.parse(sessionStorage.getItem(currentToken)).accessToken,
+      },
+      data: {
+        'entry': JSON.stringify(entry)
+      },
+    }).done(function() {
+      alert("データを投稿しました。");
+    }).fail(function(data) {
+      alert("投稿時にエラーが発生しました。");
+    });
   }
-</script>
+
+  // 認証情報を破棄してサインアウトする
+
+  function revokeSession() {
+    $.ajax({
+      url: apiUrl + '/v4/token',
+      type: "DELETE",
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-MT-Authorization': 'MTAuth accessToken=' + JSON.parse(sessionStorage.getItem(currentToken)).accessToken,
+      }
+    }).done(function() {
+      $.ajax({
+        url: apiUrl + "/v4/authentication",
+        type: "DELETE",
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-MT-Authorization': 'MTAuth sessionId=' + sessionStorage.getItem(currentSession),
+        }
+      })
+    }).done(function() {
+      sessionStorage.removeItem(currentSession);
+      sessionStorage.removeItem(currentToken);
+      alert("サインアウトしました。");
+      location.reload();
+    }).fail(function(data) {
+      alert("サインアウト中にエラーが発生しました。もう一度サインインし直してください。");
+      sessionStorage.removeItem(currentSession);
+      sessionStorage.removeItem(currentToken);
+      location.reload();
+    });
+  }
+
+  // トークンチェック
+
+  function checkToken() {
+    const expiresIn = JSON.parse(sessionStorage.getItem(currentToken)).expiresIn;
+    const gotTokenTime = JSON.parse(sessionStorage.getItem(currentToken)).gotTokenTime;
+    if (nowTime >= expiresIn + gotTokenTime) {
+      refreshToken();
+    }
+  }
+
+  // トークンリフレッシュ
+
+  function refreshToken() {
+    $.ajax({
+      url: apiUrl + '/v4/token',
+      type: "DELETE",
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-MT-Authorization': 'MTAuth accessToken=' + JSON.parse(sessionStorage.getItem(currentToken)).accessToken,
+      }
+    }).done(function() {
+      $.ajax({
+        url: apiUrl + '/v4/token',
+        type: "POST",
+        dataType: "json",
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-MT-Authorization': 'MTAuth sessionId=' + sessionStorage.getItem(currentSession),
+        }
+      }).done(function(data) {
+        let TokenData = {
+          'accessToken': data.accessToken,
+          'expiresIn': data.expiresIn,
+          'gotTokenTime': nowTime,
+        }
+        sessionStorage.setItem(currentToken, JSON.stringify(TokenData));
+      }).fail(function(data) {
+        alert("アクセストークンのリフレッシュ中にエラーが発生しました。サインし直してください。");
+        sessionStorage.removeItem(currentSession);
+        sessionStorage.removeItem(currentToken);
+        location.reload();
+
+      });
+    });
+  }
+  });
+
+
+  </script>
+</body>
+</html>
 
