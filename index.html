@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>音声認識のデモ</title>
+  </head>
+  <body>
+    <h1>音声認識のデモ</h1>
+    <p>以下のボタンをクリックして、音声認識を開始してください。</p>
+    <button onclick="startRecognition()">音声認識を開始する</button>
+    <p id="result"></p>
+
+    <script>
+      var recognition = new webkitSpeechRecognition(); // WebKitベースのブラウザで動作するSpeechRecognitionオブジェクトを作成する
+
+      recognition.onresult = function(event) {
+        var result = event.results[0][0].transcript; // 認識結果を取得する
+        document.getElementById('result').innerHTML = result; // ページに表示する
+      };
+
+      function startRecognition() {
+        recognition.start(); // 音声認識を開始する
+      }
+    </script>
+  </body>
+</html>
